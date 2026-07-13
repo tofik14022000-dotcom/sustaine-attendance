@@ -12,7 +12,7 @@ const RADIUS_MAKSIMAL_METER = 20
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'
 
 // 🔑 PIN Rahasia Admin & Kunci Cache Lokal
-const PIN_ADMIN_RAHASIA = '1234'
+const PIN_ADMIN_RAHASIA = '011730'
 const LS_FACES_KEY = 'sustaine_absen_faces_database'
 
 interface LogAbsen {
