@@ -151,7 +151,7 @@ export default function App() {
     } catch (err) { setStatusUploadFoto('Encryption error on image processing. ❌') }
   }
 
-  // 5. PROSES LIVE SCANNING & IDENTIFIKASI WAJAH MULTI-ORANG
+  // 5. PROSES LIVE SCANNING CEPAT & IDENTIFIKASI WAJAH MULTI-ORANG
   const mulaiScanFaceID = async () => {
     if (!isDalamRadius) return alert('Access Denied: You must be within the office radius to scan!')
     if (Object.keys(registeredEmployees).length === 0) return alert('Enrollment required: No employee records found!')
@@ -166,15 +166,20 @@ export default function App() {
 
       setStatusFaceID('Scanning biological structures... Hold still.')
 
+      // ⚡ DIPANGKAS MENJADI 1 DETIK: Kamera menyala langsung deteksi instan tanpa nunggu lama
       setTimeout(async () => {
         if (!videoRef.current) return
 
-        const deteksiLive = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor()
+        // inputSize diturunkan ke 160 agar kalkulasi AI di HP/Laptop kentang jadi 3x lipat lebih cepat
+        const deteksiLive = await faceapi.detectSingleFace(
+          videoRef.current, 
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.4 })
+        ).withFaceLandmarks().withFaceDescriptor()
 
         if (!deteksiLive) {
           setStatusFaceID('Scan failed: Face architecture lost. ❌')
           matikanKamera()
-          setTimeout(() => setIsScanning(false), 2000)
+          setTimeout(() => setIsScanning(false), 1500)
           return
         }
 
@@ -207,14 +212,38 @@ export default function App() {
         setTimeout(() => {
           setIsScanning(false)
           setStatusFaceID('Face ID system is ready to use')
-        }, 3000)
+        }, 2000)
 
-      }, 2500)
+      }, 1000) // Jeda pancing kamera 1 detik saja!
 
     } catch (err) {
       setStatusFaceID('Failed to initialize local video input.')
       setIsScanning(false)
     }
+  }
+
+  // 📥 6. FUNGSI EXPORT DATA ABSENSI HARI INI KE EXCEL/CSV
+  const eksporKeCSV = () => {
+    if (riwayat.length === 0) return alert('Belum ada data absensi untuk diexport!')
+    
+    // Header Kolom Tabel Excel
+    let csvContent = 'data:text/csv;charset=utf-8,Name,Log Time,Category,Status\n'
+    
+    // Masukkan baris data riwayat absensi
+    riwayat.forEach((log) => {
+      csvContent += `"${log.nama}","${log.waktu}","${log.tipe}","${log.status}"\n`
+    })
+    
+    // Tembak unduh otomatis di browser
+    const encodedUri = encodeURI(csvContent)
+    const link = document.createElement('a')
+    const tglHariIni = new Date().toISOString().slice(0, 10)
+    link.setAttribute('href', encodedUri)
+    link.setAttribute('download', `Sustaine_Absen_Logs_${tglHariIni}.csv`)
+    document.body.appendChild(link)
+    
+    link.click()
+    document.body.removeChild(link)
   }
 
   const matikanKamera = () => { if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()) }
@@ -304,8 +333,15 @@ export default function App() {
         )}
       </div>
 
+      {/* TODAY'S ATTENDANCE LOGS CARD (DENGAN TOMBOL EXPORT) */}
       <div style={styles.logCard}>
-        <h2 style={styles.logCardTitle}>Today's Attendance Logs</h2>
+        <div style={styles.headerTabelLog}>
+          <h2 style={styles.logCardTitle}>Today's Attendance Logs</h2>
+          <button onClick={eksporKeCSV} style={styles.tombolExport}>
+            📥 Export CSV
+          </button>
+        </div>
+        
         <div style={{ overflowX: 'auto' }}>
           <table style={styles.tableElement}>
             <thead>
@@ -360,7 +396,9 @@ const styles = {
   labelAdmin: { display: 'block', fontSize: '10px', fontWeight: '700', color: '#ffffff', marginBottom: '4px' },
   fileInput: { marginTop: '6px', marginBottom: '6px', display: 'block', width: '100%', fontSize: '11px', color: '#ffffff' },
   logCard: { backgroundColor: '#0957c3', padding: '24px 20px', borderRadius: '24px', width: '100%', maxWidth: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', boxSizing: 'border-box' as const },
-  logCardTitle: { fontSize: '14px', fontWeight: '600', color: '#ffffff', marginBottom: '16px', textAlign: 'center' as const },
+  headerTabelLog: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' },
+  logCardTitle: { fontSize: '14px', fontWeight: '600', color: '#ffffff', margin: 0 },
+  tombolExport: { backgroundColor: '#ffffff', color: '#0957c3', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.1)', transition: 'all 0.2s ease' },
   tableElement: { width: '100%', borderCollapse: 'collapse' as const, fontSize: '12px' },
   tableHeaderRow: { borderBottom: '1px solid rgba(255, 255, 255, 0.25)' },
   tableTh: { padding: '8px 4px', color: '#ffffff', opacity: 0.8, fontWeight: '500', textAlign: 'left' as const },
