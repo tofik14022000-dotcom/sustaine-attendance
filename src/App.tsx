@@ -38,16 +38,12 @@ export default function App() {
   const [statusFaceID, setStatusFaceID] = useState('System initializing...')
   const [isAdminMode, setIsAdminMode] = useState(false)
 
-  // Database Wajah Terpusat Cloud
+  // Database Wajah & Riwayat Global Terpusat Cloud
   const [registeredEmployees, setRegisteredEmployees] = useState<RegisteredEmployees>({})
+  const [riwayat, setRiwayat] = useState<LogAbsen[]>([])
   
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  
-  // Data list awal bawaan dashboard
-  const [riwayat, setRiwayat] = useState<LogAbsen[]>([
-    { nama: 'Tofik_Head Creative', waktu: '14/07/2026, 00:50:48', tipe: 'Clock In', status: 'On Time ✅' }
-  ])
 
   // 1. RUMUS JARAK GPS
   const hitungJarakMeter = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -58,21 +54,30 @@ export default function App() {
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
   }
 
-  // 2. LOAD DATABASE ONLINE (REDIS) & AKSES MODEL BIOMETRIK
+  // 2. LOAD SINKRONISASI ONLINE SECARA GLOBAL (WAJAH & RIWAYAT LOGS)
   useEffect(() => {
     const muatDataDanModel = async () => {
+      // A. Ambil Data Wajah Terpusat
       try {
-        const response = await fetch('/api/faces')
-        if (response.ok) {
-          const parsedFaces = await response.json()
+        const resWajah = await fetch('/api/faces')
+        if (resWajah.ok) {
+          const parsedFaces = await resWajah.json()
           const typedFaces: RegisteredEmployees = {}
           for (const name in parsedFaces) { typedFaces[name] = new Float32Array(parsedFaces[name]) }
           setRegisteredEmployees(typedFaces)
         }
-      } catch (err) { 
-        console.error('Gagal mengambil cloud database:', err) 
-      }
+      } catch (err) { console.error(err) }
 
+      // B. Ambil Riwayat Absensi Terpusat dari Redis Cloud
+      try {
+        const resRiwayat = await fetch('/api/attendance')
+        if (resRiwayat.ok) {
+          const parsedLogs = await resRiwayat.json()
+          setRiwayat(parsedLogs)
+        }
+      } catch (err) { console.error(err) }
+
+      // C. Load Model AI Wajah
       try {
         await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
         await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
@@ -87,7 +92,7 @@ export default function App() {
     muatDataDanModel()
   }, [])
 
-  // 3. TRACK GPS REAL-TIME DENGAN VALIDASI RADIUS HINGGA 100 METER
+  // 3. TRACK GPS REAL-TIME RADIUS HINGGA 100 METER
   useEffect(() => {
     if (!navigator.geolocation) return
     const watchId = navigator.geolocation.watchPosition((position) => {
@@ -117,7 +122,7 @@ export default function App() {
     if (inputPin === PIN_ADMIN_RAHASIA) { setIsAdminMode(true) } else if (inputPin !== null) { alert('Access Denied! ❌') }
   }
 
-  // 4. REGISTRASI FOTO KARYAWAN BARU (KIRIM KE REDIS CLOUD)
+  // 4. REGISTRASI FOTO KARYAWAN BARU
   const tanganiUploadFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isModelLoaded) return alert('Biometric core is loading...')
     const file = e.target.files?.[0]
@@ -151,7 +156,7 @@ export default function App() {
     } catch (err) { setStatusUploadFoto('Encryption error on image processing. ❌') }
   }
 
-  // 5. PROSES LIVE SCANNING CEPAT & IDENTIFIKASI WAJAH MULTI-ORANG
+  // 5. PROSES LIVE SCANNING INSTAN & REKAM ABSEN GLOBAL
   const mulaiScanFaceID = async () => {
     if (!isDalamRadius) return alert('Access Denied: You must be within the office radius to scan!')
     if (Object.keys(registeredEmployees).length === 0) return alert('Enrollment required: No employee records found!')
@@ -166,11 +171,9 @@ export default function App() {
 
       setStatusFaceID('Scanning biological structures... Hold still.')
 
-      // ⚡ DIPANGKAS MENJADI 1 DETIK: Kamera menyala langsung deteksi instan tanpa nunggu lama
       setTimeout(async () => {
         if (!videoRef.current) return
 
-        // inputSize diturunkan ke 160 agar kalkulasi AI di HP/Laptop kentang jadi 3x lipat lebih cepat
         const deteksiLive = await faceapi.detectSingleFace(
           videoRef.current, 
           new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.4 })
@@ -196,14 +199,24 @@ export default function App() {
           const statusHari = sekarang.getHours() > 10 || (sekarang.getHours() === 10 && sekarang.getMinutes() > 0) ? 'Late ⚠️' : 'On Time ✅'
           const statusFinal = tipeAbsen === 'Clock Out' ? 'Clocked Out 🚗' : statusHari
 
-          setStatusFaceID(`Welcome, ${identifiedName}! 🎉`)
-          
-          setRiwayat(prev => [{
+          const newLog: LogAbsen = {
             nama: identifiedName,
             waktu: sekarang.toLocaleString('en-US', { hour12: false }),
             tipe: tipeAbsen,
             status: statusFinal
-          }, ...prev])
+          }
+
+          // ☁️ Kirim rekaman absen hari ini ke Redis Cloud agar tersinkron ke semua perangkat
+          try {
+            await fetch('/api/attendance', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ newLog })
+            })
+            setRiwayat(prev => [newLog, ...prev])
+          } catch (e) { console.error('Gagal sinkron log:', e) }
+
+          setStatusFaceID(`Welcome, ${identifiedName}! 🎉`)
         } else {
           setStatusFaceID('Access Denied: Unrecognized biometric identity! ❌')
         }
@@ -214,7 +227,7 @@ export default function App() {
           setStatusFaceID('Face ID system is ready to use')
         }, 2000)
 
-      }, 1000) // Jeda pancing kamera 1 detik saja!
+      }, 1000)
 
     } catch (err) {
       setStatusFaceID('Failed to initialize local video input.')
@@ -222,26 +235,19 @@ export default function App() {
     }
   }
 
-  // 📥 6. FUNGSI EXPORT DATA ABSENSI HARI INI KE EXCEL/CSV
+  // 📥 6. FUNGSI EXPORT DATA ABSENSI HARI INI KE EXCEL/CSV (PINDAH KE ADMIN PORTAL)
   const eksporKeCSV = () => {
     if (riwayat.length === 0) return alert('Belum ada data absensi untuk diexport!')
-    
-    // Header Kolom Tabel Excel
     let csvContent = 'data:text/csv;charset=utf-8,Name,Log Time,Category,Status\n'
-    
-    // Masukkan baris data riwayat absensi
     riwayat.forEach((log) => {
       csvContent += `"${log.nama}","${log.waktu}","${log.tipe}","${log.status}"\n`
     })
-    
-    // Tembak unduh otomatis di browser
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
     const tglHariIni = new Date().toISOString().slice(0, 10)
     link.setAttribute('href', encodedUri)
     link.setAttribute('download', `Sustaine_Absen_Logs_${tglHariIni}.csv`)
     document.body.appendChild(link)
-    
     link.click()
     document.body.removeChild(link)
   }
@@ -272,17 +278,23 @@ export default function App() {
       <div style={styles.mainCard}>
         {!isScanning && (
           <>
+            {/* PANEL REGISTRASI ADMIN & UTILITY EXPORT RAHSIA */}
             {isAdminMode && (
               <div style={styles.uploadSection}>
                 <label style={styles.labelAdmin}>⚠️ SECURE ENROLLMENT PORTAL (CLOUD)</label>
                 <input type="file" accept="image/*" onChange={tanganiUploadFoto} style={styles.fileInput} />
                 <p style={{ margin: '4px 0', fontSize: '11px', color: '#fff' }}>{statusUploadFoto}</p>
-                <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '6px' }}>
+                <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '6px', marginBottom: '10px' }}>
                   <span style={styles.infoLabelCapsule}>Enrolled Workforce:</span>
                   <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#fff', opacity: 0.9 }}>
                     {Object.keys(registeredEmployees).length === 0 ? 'None' : Object.keys(registeredEmployees).join(', ')}
                   </p>
                 </div>
+                
+                {/* 📥 BUTTON EXPORT SEKARANG DIKUNCI AMAN DI PANEL ADMIN */}
+                <button onClick={eksporKeCSV} style={styles.tombolExportAdmin}>
+                  📥 Export Attendance Logs (CSV)
+                </button>
               </div>
             )}
 
@@ -333,16 +345,10 @@ export default function App() {
         )}
       </div>
 
-      {/* TODAY'S ATTENDANCE LOGS CARD (DENGAN TOMBOL EXPORT) */}
+      {/* TODAY'S ATTENDANCE LOGS CARD (CLEAN & MINIMALIS) */}
       <div style={styles.logCard}>
-        <div style={styles.headerTabelLog}>
-          <h2 style={styles.logCardTitle}>Today's Attendance Logs</h2>
-          <button onClick={eksporKeCSV} style={styles.tombolExport}>
-            📥 Export CSV
-          </button>
-        </div>
-        
-        <div style={{ overflowX: 'auto' }}>
+        <h2 style={styles.logCardTitle}>Today's Attendance Logs</h2>
+        <div style={{ overflowX: 'auto', marginTop: '12px' }}>
           <table style={styles.tableElement}>
             <thead>
               <tr style={styles.tableHeaderRow}>
@@ -353,14 +359,22 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {riwayat.map((log, idx) => (
-                <tr key={idx} style={styles.tableDataRow}>
-                  <td style={{ ...styles.tableTd, fontWeight: '600' }}>{log.nama}</td>
-                  <td style={styles.tableTd}>{log.waktu}</td>
-                  <td style={styles.tableTd}>{log.tipe}</td>
-                  <td style={styles.tdRight}>{log.status}</td>
+              {riwayat.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ textAlign: 'center', padding: '20px 0', opacity: 0.6, fontSize: '12px', color: '#fff' }}>
+                    Belum ada riwayat absensi global hari ini.
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                riwayat.map((log, idx) => (
+                  <tr key={idx} style={styles.tableDataRow}>
+                    <td style={{ ...styles.tableTd, fontWeight: '600' }}>{log.nama}</td>
+                    <td style={styles.tableTd}>{log.waktu}</td>
+                    <td style={styles.tableTd}>{log.tipe}</td>
+                    <td style={styles.tdRight}>{log.status}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -395,10 +409,9 @@ const styles = {
   uploadSection: { backgroundColor: 'rgba(0,0,0,0.2)', padding: '14px', borderRadius: '16px', border: '1px dashed #ffffff', marginBottom: '20px', boxSizing: 'border-box' as const },
   labelAdmin: { display: 'block', fontSize: '10px', fontWeight: '700', color: '#ffffff', marginBottom: '4px' },
   fileInput: { marginTop: '6px', marginBottom: '6px', display: 'block', width: '100%', fontSize: '11px', color: '#ffffff' },
+  tombolExportAdmin: { width: '100%', backgroundColor: '#ffffff', color: '#0957c3', border: 'none', borderRadius: '12px', padding: '10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', transition: 'all 0.2s ease' },
   logCard: { backgroundColor: '#0957c3', padding: '24px 20px', borderRadius: '24px', width: '100%', maxWidth: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', boxSizing: 'border-box' as const },
-  headerTabelLog: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' },
-  logCardTitle: { fontSize: '14px', fontWeight: '600', color: '#ffffff', margin: 0 },
-  tombolExport: { backgroundColor: '#ffffff', color: '#0957c3', border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.1)', transition: 'all 0.2s ease' },
+  logCardTitle: { fontSize: '14px', fontWeight: '600', color: '#ffffff', margin: 0, textAlign: 'center' as const },
   tableElement: { width: '100%', borderCollapse: 'collapse' as const, fontSize: '12px' },
   tableHeaderRow: { borderBottom: '1px solid rgba(255, 255, 255, 0.25)' },
   tableTh: { padding: '8px 4px', color: '#ffffff', opacity: 0.8, fontWeight: '500', textAlign: 'left' as const },
