@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 // @ts-ignore
 import * as faceapi from '@vladmandic/face-api'
 
-// 🏢 KOORDINAT RESMI KANTOR & RADIUS DIKUNCI STRICT 20 METER
+// 🏢 KOORDINAT RESMI KANTOR & RADIUS DIKUNCI STRICT 100 METER
 const KANTOR_LAT = -6.183546797680162
 const KANTOR_LNG = 106.896546842617
 const RADIUS_MAKSIMAL_METER = 100 
@@ -85,7 +85,7 @@ export default function App() {
     loadModels()
   }, [])
 
-  // 3. TRACK GPS REAL-TIME DENGAN VALIDASI RADIUS 20 METER
+  // 3. TRACK GPS REAL-TIME DENGAN VALIDASI RADIUS HINGGA 100 METER
   useEffect(() => {
     if (!navigator.geolocation) return
     const watchId = navigator.geolocation.watchPosition((position) => {
@@ -96,11 +96,16 @@ export default function App() {
       const dalamRadius = jarak <= RADIUS_MAKSIMAL_METER
       setIsDalamRadius(dalamRadius)
       setStatusGPS(dalamRadius ? 'Within Office Radius' : 'Outside Office Radius')
-    }, () => {
-      // 🛠️ Variabel error yang mubazir sudah dihapus agar disetujui TypeScript production
-      setStatusGPS('GPS Access Denied! ❌')
-      setInfoJarak('Please enable location services.')
-    }, { enableHighAccuracy: true })
+    }, (err) => {
+      // Menangani error secara pintar & mematuhi TypeScript strict production
+      if (err.code === 1) {
+        setStatusGPS('GPS Access Denied! ❌')
+        setInfoJarak('Please enable location services in browser settings.')
+      } else {
+        setStatusGPS('Locating Device... ⏳')
+        setInfoJarak('MacBook sedang menyelaraskan koordinat Wi-Fi sekitar.')
+      }
+    }, { enableHighAccuracy: false, timeout: 10000 }) // Dioptimalkan agar instan membaca Wi-Fi Mac
     
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
@@ -141,7 +146,7 @@ export default function App() {
 
   // 5. PROSES LIVE SCANNING & IDENTIFIKASI WAJAH MULTI-ORANG
   const mulaiScanFaceID = async () => {
-    if (!isDalamRadius) return alert('Access Denied: You must be within the 20-meter office radius to scan!')
+    if (!isDalamRadius) return alert('Access Denied: You must be within the office radius to scan!')
     if (Object.keys(registeredEmployees).length === 0) return alert('Enrollment required: No employee records found!')
 
     setIsScanning(true)
@@ -310,7 +315,7 @@ export default function App() {
 
         </div>
 
-        {/* TOMBOL PROSES TERKUNCI RADIUS 20 METER */}
+        {/* TOMBOL PROSES TERKUNCI RADIUS */}
         {!isScanning ? (
           <button 
             disabled={!isDalamRadius || Object.keys(registeredEmployees).length === 0 || !isModelLoaded}
