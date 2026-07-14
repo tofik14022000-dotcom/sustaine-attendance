@@ -6,7 +6,7 @@ import * as faceapi from '@vladmandic/face-api'
 // 🏢 KOORDINAT RESMI KANTOR & RADIUS DIKUNCI STRICT 20 METER
 const KANTOR_LAT = -6.183546797680162
 const KANTOR_LNG = 106.896546842617
-const RADIUS_MAKSIMAL_METER = 20 
+const RADIUS_MAKSIMAL_METER = 100 
 
 // 🧠 URL Otak AI dari CDN
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'
