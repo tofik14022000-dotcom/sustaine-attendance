@@ -16,6 +16,7 @@ const PIN_ADMIN_RAHASIA = '011730'
 
 interface LogAbsen {
   nama: string
+  role: string
   waktu: string
   tipe: string
   status: string
@@ -57,7 +58,6 @@ export default function App() {
   // 2. LOAD SINKRONISASI ONLINE SECARA GLOBAL (WAJAH & RIWAYAT LOGS)
   useEffect(() => {
     const muatDataDanModel = async () => {
-      // A. Ambil Data Wajah Terpusat
       try {
         const resWajah = await fetch('/api/faces')
         if (resWajah.ok) {
@@ -68,7 +68,6 @@ export default function App() {
         }
       } catch (err) { console.error(err) }
 
-      // B. Ambil Riwayat Absensi Terpusat dari Redis Cloud
       try {
         const resRiwayat = await fetch('/api/attendance')
         if (resRiwayat.ok) {
@@ -77,7 +76,6 @@ export default function App() {
         }
       } catch (err) { console.error(err) }
 
-      // C. Load Model AI Wajah
       try {
         await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
         await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
@@ -122,13 +120,13 @@ export default function App() {
     if (inputPin === PIN_ADMIN_RAHASIA) { setIsAdminMode(true) } else if (inputPin !== null) { alert('Access Denied! ❌') }
   }
 
-  // 4. REGISTRASI FOTO KARYAWAN BARU
+  // 4. REGISTRASI FOTO KARYAWAN BARU (FORMAT: Nama_Jabatan.jpg)
   const tanganiUploadFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isModelLoaded) return alert('Biometric core is loading...')
     const file = e.target.files?.[0]
     if (!file) return
 
-    const cleanName = file.name.split('.').slice(0, -1).join('.').replace(/_/g, ' ') || file.name
+    const cleanName = file.name.split('.').slice(0, -1).join('.') || file.name
     setStatusUploadFoto(`Analyzing visual profile: "${file.name}"...`)
     
     try {
@@ -148,7 +146,7 @@ export default function App() {
 
         if (response.ok) {
           setRegisteredEmployees(prev => ({ ...prev, [cleanName]: deteksi.descriptor }))
-          setStatusUploadFoto(`Employee "${cleanName}" securely enrolled to Cloud Database! ☁️🔒✅`)
+          setStatusUploadFoto(`Employee "${cleanName.replace(/_/g, ' - ')}" securely enrolled! ☁️🔒✅`)
         } else {
           setStatusUploadFoto('Failed to synchronize data with Cloud Server. ❌')
         }
@@ -156,7 +154,7 @@ export default function App() {
     } catch (err) { setStatusUploadFoto('Encryption error on image processing. ❌') }
   }
 
-  // 5. PROSES LIVE SCANNING INSTAN & REKAM ABSEN GLOBAL
+  // 5. PROSES LIVE SCANNING CEPAT & URUS SINKRONISASI KOLOM
   const mulaiScanFaceID = async () => {
     if (!isDalamRadius) return alert('Access Denied: You must be within the office radius to scan!')
     if (Object.keys(registeredEmployees).length === 0) return alert('Enrollment required: No employee records found!')
@@ -199,14 +197,23 @@ export default function App() {
           const statusHari = sekarang.getHours() > 10 || (sekarang.getHours() === 10 && sekarang.getMinutes() > 0) ? 'Late ⚠️' : 'On Time ✅'
           const statusFinal = tipeAbsen === 'Clock Out' ? 'Clocked Out 🚗' : statusHari
 
+          // Memisahkan nama dan jabatan dari database string
+          let displayName = identifiedName
+          let displayRole = 'Staff'
+          if (identifiedName.includes('_')) {
+            const parts = identifiedName.split('_')
+            displayName = parts[0].trim()
+            displayRole = parts[1].trim()
+          }
+
           const newLog: LogAbsen = {
-            nama: identifiedName,
+            nama: displayName,
+            role: displayRole,
             waktu: sekarang.toLocaleString('en-US', { hour12: false }),
             tipe: tipeAbsen,
             status: statusFinal
           }
 
-          // ☁️ Kirim rekaman absen hari ini ke Redis Cloud agar tersinkron ke semua perangkat
           try {
             await fetch('/api/attendance', {
               method: 'POST',
@@ -216,7 +223,7 @@ export default function App() {
             setRiwayat(prev => [newLog, ...prev])
           } catch (e) { console.error('Gagal sinkron log:', e) }
 
-          setStatusFaceID(`Welcome, ${identifiedName}! 🎉`)
+          setStatusFaceID(`Welcome, ${displayName}! 🎉`)
         } else {
           setStatusFaceID('Access Denied: Unrecognized biometric identity! ❌')
         }
@@ -235,12 +242,12 @@ export default function App() {
     }
   }
 
-  // 📥 6. FUNGSI EXPORT DATA ABSENSI HARI INI KE EXCEL/CSV (PINDAH KE ADMIN PORTAL)
+  // 📥 6. EXPORT DATA ABSENSI LENGKAP DENGAN DUA KOLOM TERPISAH
   const eksporKeCSV = () => {
-    if (riwayat.length === 0) return alert('Belum ada data absensi untuk diexport!')
-    let csvContent = 'data:text/csv;charset=utf-8,Name,Log Time,Category,Status\n'
+    if (riwayat.length === 0) return alert('No attendance logs available to export!')
+    let csvContent = 'data:text/csv;charset=utf-8,Name,Role,Log Time,Category,Status\n'
     riwayat.forEach((log) => {
-      csvContent += `"${log.nama}","${log.waktu}","${log.tipe}","${log.status}"\n`
+      csvContent += `"${log.nama}","${log.role}","${log.waktu}","${log.tipe}","${log.status}"\n`
     })
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
@@ -278,7 +285,6 @@ export default function App() {
       <div style={styles.mainCard}>
         {!isScanning && (
           <>
-            {/* PANEL REGISTRASI ADMIN & UTILITY EXPORT RAHSIA */}
             {isAdminMode && (
               <div style={styles.uploadSection}>
                 <label style={styles.labelAdmin}>⚠️ SECURE ENROLLMENT PORTAL (CLOUD)</label>
@@ -287,11 +293,9 @@ export default function App() {
                 <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '6px', marginBottom: '10px' }}>
                   <span style={styles.infoLabelCapsule}>Enrolled Workforce:</span>
                   <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#fff', opacity: 0.9 }}>
-                    {Object.keys(registeredEmployees).length === 0 ? 'None' : Object.keys(registeredEmployees).join(', ')}
+                    {Object.keys(registeredEmployees).length === 0 ? 'None' : Object.keys(registeredEmployees).map(k => k.replace(/_/g, ' - ')).join(', ')}
                   </p>
                 </div>
-                
-                {/* 📥 BUTTON EXPORT SEKARANG DIKUNCI AMAN DI PANEL ADMIN */}
                 <button onClick={eksporKeCSV} style={styles.tombolExportAdmin}>
                   📥 Export Attendance Logs (CSV)
                 </button>
@@ -345,7 +349,7 @@ export default function App() {
         )}
       </div>
 
-      {/* TODAY'S ATTENDANCE LOGS CARD (CLEAN & MINIMALIS) */}
+      {/* TODAY'S ATTENDANCE LOGS CARD (5 KOLOM PROFESIONAL) */}
       <div style={styles.logCard}>
         <h2 style={styles.logCardTitle}>Today's Attendance Logs</h2>
         <div style={{ overflowX: 'auto', marginTop: '12px' }}>
@@ -353,6 +357,7 @@ export default function App() {
             <thead>
               <tr style={styles.tableHeaderRow}>
                 <th style={styles.tableTh}>Name</th>
+                <th style={styles.tableTh}>Role</th>
                 <th style={styles.tableTh}>Log Time</th>
                 <th style={styles.tableTh}>Category</th>
                 <th style={styles.thRight}>Status</th>
@@ -361,14 +366,15 @@ export default function App() {
             <tbody>
               {riwayat.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', padding: '20px 0', opacity: 0.6, fontSize: '12px', color: '#fff' }}>
-                    Belum ada riwayat absensi global hari ini.
+                  <td colSpan={5} style={{ textAlign: 'center', padding: '24px 0', opacity: 0.6, fontSize: '12px', color: '#fff', fontStyle: 'italic' }}>
+                    No global attendance records for today.
                   </td>
                 </tr>
               ) : (
                 riwayat.map((log, idx) => (
                   <tr key={idx} style={styles.tableDataRow}>
                     <td style={{ ...styles.tableTd, fontWeight: '600' }}>{log.nama}</td>
+                    <td style={{ ...styles.tableTd, color: '#e5e5ea', opacity: 0.9 }}>{log.role}</td>
                     <td style={styles.tableTd}>{log.waktu}</td>
                     <td style={styles.tableTd}>{log.tipe}</td>
                     <td style={styles.tdRight}>{log.status}</td>
