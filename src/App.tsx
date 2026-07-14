@@ -3,15 +3,10 @@ import { useState, useEffect, useRef } from 'react'
 // @ts-ignore
 import * as faceapi from '@vladmandic/face-api'
 
-// 🏢 KOORDINAT RESMI KANTOR & RADIUS DIKUNCI STRICT 100 METER
 const KANTOR_LAT = -6.183546797680162
 const KANTOR_LNG = 106.896546842617
 const RADIUS_MAKSIMAL_METER = 100 
-
-// 🧠 URL Otak AI dari CDN
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'
-
-// 🔑 PIN Rahasia Admin & Kunci Kredensial
 const PIN_ADMIN_RAHASIA = '011730'
 
 interface LogAbsen {
@@ -32,21 +27,18 @@ export default function App() {
   const [isDalamRadius, setIsDalamRadius] = useState(false)
   const [infoJarak, setInfoJarak] = useState('Calculating device distance...')
   
-  // State AI Wajah & Akses Admin
   const [isModelLoaded, setIsModelLoaded] = useState(false)
   const [statusUploadFoto, setStatusUploadFoto] = useState('Ready to upload corporate face metrics ⬆️')
   const [isScanning, setIsScanning] = useState(false)
   const [statusFaceID, setStatusFaceID] = useState('System initializing...')
   const [isAdminMode, setIsAdminMode] = useState(false)
 
-  // Database Wajah & Riwayat Global Terpusat Cloud
   const [registeredEmployees, setRegisteredEmployees] = useState<RegisteredEmployees>({})
   const [riwayat, setRiwayat] = useState<LogAbsen[]>([])
   
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
-  // 1. RUMUS JARAK GPS
   const hitungJarakMeter = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371e3
     const phi1 = lat1 * Math.PI / 180, phi2 = lat2 * Math.PI / 180
@@ -55,7 +47,6 @@ export default function App() {
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
   }
 
-  // 2. LOAD SINKRONISASI ONLINE SECARA GLOBAL (WAJAH & RIWAYAT LOGS)
   useEffect(() => {
     const muatDataDanModel = async () => {
       try {
@@ -82,45 +73,32 @@ export default function App() {
         await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
         setIsModelLoaded(true)
         setStatusFaceID('Face ID system is ready to use')
-      } catch (err) { 
-        setStatusFaceID('Failed to load biometric layers.') 
-      }
+      } catch (err) { setStatusFaceID('Failed to load biometric layers.') }
     }
-    
     muatDataDanModel()
   }, [])
 
-  // 3. TRACK GPS REAL-TIME RADIUS HINGGA 100 METER
   useEffect(() => {
     if (!navigator.geolocation) return
     const watchId = navigator.geolocation.watchPosition((position) => {
       const { latitude, longitude } = position.coords
       const jarak = hitungJarakMeter(latitude, longitude, KANTOR_LAT, KANTOR_LNG)
       setInfoJarak(`Device distance: ${Math.round(jarak)} meters from office area`)
-      
       const dalamRadius = jarak <= RADIUS_MAKSIMAL_METER
       setIsDalamRadius(dalamRadius)
       setStatusGPS(dalamRadius ? 'Within Office Radius' : 'Outside Office Radius')
     }, (err) => {
-      if (err.code === 1) {
-        setStatusGPS('GPS Access Denied! ❌')
-        setInfoJarak('Please enable location services in browser settings.')
-      } else {
-        setStatusGPS('Locating Device... ⏳')
-        setInfoJarak('MacBook sedang menyelaraskan koordinat Wi-Fi sekitar.')
-      }
+      setStatusGPS('GPS Access Denied! ❌')
     }, { enableHighAccuracy: false, timeout: 10000 })
-    
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
 
   const tanganiKlikAdmin = () => {
     if (isAdminMode) return setIsAdminMode(false)
     const inputPin = prompt('Enter Admin Credentials PIN:')
-    if (inputPin === PIN_ADMIN_RAHASIA) { setIsAdminMode(true) } else if (inputPin !== null) { alert('Access Denied! ❌') }
+    if (inputPin === PIN_ADMIN_RAHASIA) setIsAdminMode(true)
   }
 
-  // 4. REGISTRASI FOTO KARYAWAN BARU (FORMAT BARU: Nama_Jabatan.jpg atau Nama-Jabatan.jpg)
   const tanganiUploadFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isModelLoaded) return alert('Biometric core is loading...')
     const file = e.target.files?.[0]
@@ -137,7 +115,6 @@ export default function App() {
         setStatusUploadFoto('Face landmarks not resolved. Retry with a clearer image! ❌')
       } else {
         const arrayDescriptor = Array.from(deteksi.descriptor)
-
         const response = await fetch('/api/faces', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -146,49 +123,31 @@ export default function App() {
 
         if (response.ok) {
           setRegisteredEmployees(prev => ({ ...prev, [cleanName]: deteksi.descriptor }))
-          // Mengubah visual tampilan pemisah saat sukses terdaftar
           const namaRapi = cleanName.includes('_') ? cleanName.replace(/_/g, ' - ') : cleanName.replace(/-/g, ' - ')
           setStatusUploadFoto(`Employee "${namaRapi}" securely enrolled! ☁️🔒✅`)
-        } else {
-          setStatusUploadFoto('Failed to synchronize data with Cloud Server. ❌')
         }
       }
-    } catch (err) { setStatusUploadFoto('Encryption error on image processing. ❌') }
+    } catch (err) { setStatusUploadFoto('Encryption error. ❌') }
   }
 
-  // 5. PROSES LIVE SCANNING CEPAT & URUS SINKRONISASI DUA KOLOM
   const mulaiScanFaceID = async () => {
-    if (!isDalamRadius) return alert('Access Denied: You must be within the office radius to scan!')
-    if (Object.keys(registeredEmployees).length === 0) return alert('Enrollment required: No employee records found!')
-
+    if (!isDalamRadius || Object.keys(registeredEmployees).length === 0 || !isModelLoaded) return
     setIsScanning(true)
-    setStatusFaceID('Activating optical matrix...')
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
       streamRef.current = stream
       if (videoRef.current) videoRef.current.srcObject = stream
 
-      setStatusFaceID('Scanning biological structures... Hold still.')
-
       setTimeout(async () => {
         if (!videoRef.current) return
-
-        const deteksiLive = await faceapi.detectSingleFace(
-          videoRef.current, 
-          new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.4 })
-        ).withFaceLandmarks().withFaceDescriptor()
+        const deteksiLive = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.4 })).withFaceLandmarks().withFaceDescriptor()
 
         if (!deteksiLive) {
-          setStatusFaceID('Scan failed: Face architecture lost. ❌')
-          matikanKamera()
-          setTimeout(() => setIsScanning(false), 1500)
-          return
+          matikanKamera(); setIsScanning(false); return
         }
 
         let identifiedName = ''
         let minDistance = 1.0
-
         for (const name in registeredEmployees) {
           const distance = faceapi.euclideanDistance(registeredEmployees[name], deteksiLive.descriptor)
           if (distance < minDistance) { minDistance = distance; identifiedName = name; }
@@ -199,14 +158,13 @@ export default function App() {
           const statusHari = sekarang.getHours() > 10 || (sekarang.getHours() === 10 && sekarang.getMinutes() > 0) ? 'Late ⚠️' : 'On Time ✅'
           const statusFinal = tipeAbsen === 'Clock Out' ? 'Clocked Out 🚗' : statusHari
 
-          // ⚡ LOGIKA PEMISAH KOLOM LEBIH PINTAR (Mendukung Underscore & Hyphen)
           let displayName = identifiedName
           let displayRole = 'Staff'
           
           if (identifiedName.includes('_')) {
             const parts = identifiedName.split('_')
-            displayName = parts[0].trim()
-            displayRole = parts[1].trim()
+            displayName = parts[0].replace(/-/g, ' ').trim()
+            displayRole = parts[1].replace(/-/g, ' ').trim()
           } else if (identifiedName.includes('-')) {
             const parts = identifiedName.split('-')
             displayName = parts[0].trim()
@@ -221,46 +179,38 @@ export default function App() {
             status: statusFinal
           }
 
-          try {
-            await fetch('/api/attendance', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ newLog })
-            })
-            setRiwayat(prev => [newLog, ...prev])
-          } catch (e) { console.error('Gagal sinkron log:', e) }
-
-          setStatusFaceID(`Welcome, ${displayName}! 🎉`)
-        } else {
-          setStatusFaceID('Access Denied: Unrecognized biometric identity! ❌')
+          await fetch('/api/attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newLog })
+          })
+          setRiwayat(prev => [newLog, ...prev])
         }
-
-        matikanKamera()
-        setTimeout(() => {
-          setIsScanning(false)
-          setStatusFaceID('Face ID system is ready to use')
-        }, 2000)
-
+        matikanKamera(); setIsScanning(false)
       }, 1000)
-
-    } catch (err) {
-      setStatusFaceID('Failed to initialize local video input.')
-      setIsScanning(false)
-    }
+    } catch (err) { setIsScanning(false) }
   }
 
-  // 📥 6. EXPORT DATA ABSENSI LENGKAP DENGAN DUA KOLOM TERPISAH
+  // 🧹 FUNGSI RESET TOTAL DATABASE DI REDIS CLOUD VIA FRONTEND
+  const handleResetDatabase = async () => {
+    if (!confirm('Are you absolutely sure you want to wipe ALL employee records and logs from Cloud Redis?')) return
+    try {
+      await fetch('/api/faces', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'CLEAR_ALL' }) })
+      await fetch('/api/attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'CLEAR_ALL' }) })
+      setRegisteredEmployees({})
+      setRiwayat([])
+      alert('Cloud Database successfully wiped clean! 🧹✨')
+    } catch (e) { alert('Failed to clear database.') }
+  }
+
   const eksporKeCSV = () => {
     if (riwayat.length === 0) return alert('No attendance logs available to export!')
     let csvContent = 'data:text/csv;charset=utf-8,Name,Role,Log Time,Category,Status\n'
-    riwayat.forEach((log) => {
-      csvContent += `"${log.nama}","${log.role}","${log.waktu}","${log.tipe}","${log.status}"\n`
-    })
+    riwayat.forEach((log) => { csvContent += `"${log.nama}","${log.role}","${log.waktu}","${log.tipe}","${log.status}"\n` })
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
-    const tglHariIni = new Date().toISOString().slice(0, 10)
     link.setAttribute('href', encodedUri)
-    link.setAttribute('download', `Sustaine_Absen_Logs_${tglHariIni}.csv`)
+    link.setAttribute('download', `Sustaine_Absen_Logs_${new Date().toISOString().slice(0, 10)}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -271,17 +221,7 @@ export default function App() {
   return (
     <div style={styles.container}>
       <div style={styles.logoContainer}>
-        <img 
-          src="/logo.png" 
-          alt="Sustaine" 
-          style={styles.logoImage}
-          onError={(e) => {
-            (e.target as HTMLElement).style.display = 'none';
-            const backup = document.getElementById('backup-logo');
-            if (backup) backup.style.display = 'block';
-          }}
-        />
-        <div id="backup-logo" style={styles.backupLogoText}>sustaine</div>
+        <img src="/logo.png" alt="Sustaine" style={styles.logoImage} onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}/>
       </div>
 
       <div style={{ textAlign: 'center', marginBottom: '12px' }}>
@@ -300,16 +240,14 @@ export default function App() {
                 <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '6px', marginBottom: '10px' }}>
                   <span style={styles.infoLabelCapsule}>Enrolled Workforce:</span>
                   <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#fff', opacity: 0.9 }}>
-                    {Object.keys(registeredEmployees).length === 0 
-                      ? 'None' 
-                      : Object.keys(registeredEmployees).map(k => {
-                          return k.includes('_') ? k.split('_')[0] : (k.includes('-') ? k.split('-')[0] : k)
-                        }).join(', ')
-                    }
+                    {Object.keys(registeredEmployees).length === 0 ? 'None' : Object.keys(registeredEmployees).map(k => k.split('_')[0]).join(', ')}
                   </p>
                 </div>
-                <button onClick={eksporKeCSV} style={styles.tombolExportAdmin}>
-                  📥 Export Attendance Logs (CSV)
+                <button onClick={eksporKeCSV} style={styles.tombolExportAdmin}>📥 Export Attendance Logs (CSV)</button>
+                
+                {/* 🧹 TOMBOL RESET DIJAMIN MANTAP */}
+                <button onClick={handleResetDatabase} style={{ ...styles.tombolExportAdmin, backgroundColor: '#ff4d4d', color: '#fff', marginTop: '8px' }}>
+                  🧹 Wipe Cloud Database (Reset All)
                 </button>
               </div>
             )}
@@ -331,9 +269,7 @@ export default function App() {
         <div style={styles.innerValidationBox}>
           <div style={styles.infoLabelCapsule}>GEOFENCING AREA VALIDATION</div>
           <p style={styles.statusBesar}>{statusGPS}</p>
-          <div style={{ ...styles.iconContainerCheck, backgroundColor: isDalamRadius ? '#ffffff' : 'rgba(255,255,255,0.2)' }}>
-            <span style={{ color: isDalamRadius ? '#0957c3' : '#ff4d4d', fontSize: '18px', fontWeight: 'bold' }}>{isDalamRadius ? '✓' : '✕'}</span>
-          </div>
+          <div style={{ ...styles.iconContainerCheck, backgroundColor: isDalamRadius ? '#ffffff' : 'rgba(255,255,255,0.2)' }}><span style={{ color: isDalamRadius ? '#0957c3' : '#ff4d4d', fontSize: '18px', fontWeight: 'bold' }}>{isDalamRadius ? '✓' : '✕'}</span></div>
           <p style={styles.statusKecilText}>{infoJarak}</p>
 
           <div style={{ margin: '16px 0 10px 0', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '14px' }}>
@@ -343,17 +279,7 @@ export default function App() {
         </div>
 
         {!isScanning ? (
-          <button 
-            disabled={!isDalamRadius || Object.keys(registeredEmployees).length === 0 || !isModelLoaded}
-            onClick={mulaiScanFaceID}
-            style={{
-              ...styles.actionButtonMain,
-              backgroundColor: isDalamRadius ? '#ffffff' : 'rgba(255, 255, 255, 0.25)',
-              color: isDalamRadius ? '#0957c3' : 'rgba(255, 255, 255, 0.5)',
-              cursor: isDalamRadius ? 'pointer' : 'not-allowed',
-              boxShadow: isDalamRadius ? '0 8px 20px rgba(0,0,0,0.15)' : 'none'
-            }}
-          >
+          <button disabled={!isDalamRadius || Object.keys(registeredEmployees).length === 0 || !isModelLoaded} onClick={mulaiScanFaceID} style={{ ...styles.actionButtonMain, backgroundColor: isDalamRadius ? '#ffffff' : 'rgba(255, 255, 255, 0.25)', color: isDalamRadius ? '#0957c3' : 'rgba(255, 255, 255, 0.5)', cursor: isDalamRadius ? 'pointer' : 'not-allowed' }}>
             {!isModelLoaded ? 'Loading System...' : (!isDalamRadius ? 'Outside Office Radius' : (Object.keys(registeredEmployees).length > 0 ? `Verify Face (${tipeAbsen})` : 'Enrollment Required'))}
           </button>
         ) : (
@@ -361,7 +287,6 @@ export default function App() {
         )}
       </div>
 
-      {/* TODAY'S ATTENDANCE LOGS CARD (5 KOLOM PROFESIONAL) */}
       <div style={styles.logCard}>
         <h2 style={styles.logCardTitle}>Today's Attendance Logs</h2>
         <div style={{ overflowX: 'auto', marginTop: '12px' }}>
@@ -409,7 +334,6 @@ const styles = {
   container: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'flex-start', minHeight: '100vh', backgroundColor: '#121214', color: '#ffffff', fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif', padding: '40px 16px 80px 16px', gap: '16px', boxSizing: 'border-box' as const, width: '100vw' },
   logoContainer: { marginBottom: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center' },
   logoImage: { height: '65px', objectFit: 'contain' as const },
-  backupLogoText: { display: 'none', backgroundColor: '#0957c3', color: '#ffffff', padding: '6px 24px', borderRadius: '10px', fontWeight: 'bold', fontSize: '20px', letterSpacing: '-0.5px' },
   judulAplikasi: { fontSize: '28px', fontWeight: '700', color: '#ffffff', margin: 0, letterSpacing: '-0.5px' },
   subJudulAplikasi: { fontSize: '13px', color: '#8e8e93', margin: '4px 0 12px 0' },
   mainCard: { backgroundColor: '#0957c3', padding: '24px', borderRadius: '28px', width: '100%', maxWidth: '380px', boxShadow: '0 20px 40px rgba(0,0,0,0.3)', boxSizing: 'border-box' as const },
@@ -420,14 +344,14 @@ const styles = {
   statusBesar: { fontSize: '16px', fontWeight: '600', color: '#ffffff', margin: '4px 0 12px 0' },
   statusKecilText: { fontSize: '12px', color: '#ffffff', opacity: 0.85, margin: '4px 0 0 0', lineHeight: '1.4' },
   iconContainerCheck: { width: '32px', height: '32px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px auto' },
-  actionButtonMain: { width: '100%', border: 'none', borderRadius: '16px', padding: '16px', fontSize: '17px', fontWeight: '700', boxSizing: 'border-box' as const, transition: 'all 0.2s ease' },
+  actionButtonMain: { width: '100%', border: 'none', borderRadius: '16px', padding: '16px', fontSize: '17px', fontWeight: '700', boxSizing: 'border-box' as const },
   cameraContainer: { position: 'relative' as const, width: '100%', height: '200px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#000', border: '2px solid #ffffff', marginBottom: '20px' },
   videoFeed: { width: '100%', height: '100%', objectFit: 'cover' as const, transform: 'scaleX(-1)' },
   laserLine: { position: 'absolute' as const, top: 0, left: 0, width: '100%', height: '4px', backgroundColor: '#22c55e', boxShadow: '0 0 12px #22c55e', animation: 'scan 2s linear infinite' },
   uploadSection: { backgroundColor: 'rgba(0,0,0,0.2)', padding: '14px', borderRadius: '16px', border: '1px dashed #ffffff', marginBottom: '20px', boxSizing: 'border-box' as const },
   labelAdmin: { display: 'block', fontSize: '10px', fontWeight: '700', color: '#ffffff', marginBottom: '4px' },
   fileInput: { marginTop: '6px', marginBottom: '6px', display: 'block', width: '100%', fontSize: '11px', color: '#ffffff' },
-  tombolExportAdmin: { width: '100%', backgroundColor: '#ffffff', color: '#0957c3', border: 'none', borderRadius: '12px', padding: '10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', transition: 'all 0.2s ease' },
+  tombolExportAdmin: { width: '100%', backgroundColor: '#ffffff', color: '#0957c3', border: 'none', borderRadius: '12px', padding: '10px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.15)' },
   logCard: { backgroundColor: '#0957c3', padding: '24px 20px', borderRadius: '24px', width: '100%', maxWidth: '380px', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', boxSizing: 'border-box' as const },
   logCardTitle: { fontSize: '14px', fontWeight: '600', color: '#ffffff', margin: 0, textAlign: 'center' as const },
   tableElement: { width: '100%', borderCollapse: 'collapse' as const, fontSize: '12px' },
