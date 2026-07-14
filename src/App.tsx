@@ -120,7 +120,7 @@ export default function App() {
     if (inputPin === PIN_ADMIN_RAHASIA) { setIsAdminMode(true) } else if (inputPin !== null) { alert('Access Denied! ❌') }
   }
 
-  // 4. REGISTRASI FOTO KARYAWAN BARU (FORMAT: Nama_Jabatan.jpg)
+  // 4. REGISTRASI FOTO KARYAWAN BARU (FORMAT BARU: Nama_Jabatan.jpg atau Nama-Jabatan.jpg)
   const tanganiUploadFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isModelLoaded) return alert('Biometric core is loading...')
     const file = e.target.files?.[0]
@@ -146,7 +146,9 @@ export default function App() {
 
         if (response.ok) {
           setRegisteredEmployees(prev => ({ ...prev, [cleanName]: deteksi.descriptor }))
-          setStatusUploadFoto(`Employee "${cleanName.replace(/_/g, ' - ')}" securely enrolled! ☁️🔒✅`)
+          // Mengubah visual tampilan pemisah saat sukses terdaftar
+          const namaRapi = cleanName.includes('_') ? cleanName.replace(/_/g, ' - ') : cleanName.replace(/-/g, ' - ')
+          setStatusUploadFoto(`Employee "${namaRapi}" securely enrolled! ☁️🔒✅`)
         } else {
           setStatusUploadFoto('Failed to synchronize data with Cloud Server. ❌')
         }
@@ -154,7 +156,7 @@ export default function App() {
     } catch (err) { setStatusUploadFoto('Encryption error on image processing. ❌') }
   }
 
-  // 5. PROSES LIVE SCANNING CEPAT & URUS SINKRONISASI KOLOM
+  // 5. PROSES LIVE SCANNING CEPAT & URUS SINKRONISASI DUA KOLOM
   const mulaiScanFaceID = async () => {
     if (!isDalamRadius) return alert('Access Denied: You must be within the office radius to scan!')
     if (Object.keys(registeredEmployees).length === 0) return alert('Enrollment required: No employee records found!')
@@ -197,11 +199,16 @@ export default function App() {
           const statusHari = sekarang.getHours() > 10 || (sekarang.getHours() === 10 && sekarang.getMinutes() > 0) ? 'Late ⚠️' : 'On Time ✅'
           const statusFinal = tipeAbsen === 'Clock Out' ? 'Clocked Out 🚗' : statusHari
 
-          // Memisahkan nama dan jabatan dari database string
+          // ⚡ LOGIKA PEMISAH KOLOM LEBIH PINTAR (Mendukung Underscore & Hyphen)
           let displayName = identifiedName
           let displayRole = 'Staff'
+          
           if (identifiedName.includes('_')) {
             const parts = identifiedName.split('_')
+            displayName = parts[0].trim()
+            displayRole = parts[1].trim()
+          } else if (identifiedName.includes('-')) {
+            const parts = identifiedName.split('-')
             displayName = parts[0].trim()
             displayRole = parts[1].trim()
           }
@@ -293,7 +300,12 @@ export default function App() {
                 <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '6px', marginBottom: '10px' }}>
                   <span style={styles.infoLabelCapsule}>Enrolled Workforce:</span>
                   <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#fff', opacity: 0.9 }}>
-                    {Object.keys(registeredEmployees).length === 0 ? 'None' : Object.keys(registeredEmployees).map(k => k.replace(/_/g, ' - ')).join(', ')}
+                    {Object.keys(registeredEmployees).length === 0 
+                      ? 'None' 
+                      : Object.keys(registeredEmployees).map(k => {
+                          return k.includes('_') ? k.split('_')[0] : (k.includes('-') ? k.split('-')[0] : k)
+                        }).join(', ')
+                    }
                   </p>
                 </div>
                 <button onClick={eksporKeCSV} style={styles.tombolExportAdmin}>
