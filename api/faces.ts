@@ -1,12 +1,12 @@
 import Redis from 'ioredis'
 
-// 🔌 Menghubungkan backend ke REDIS_URL Vercel
+// 🔌 Menghubungkan backend ke REDIS_URL Vercel lo
 const redis = new Redis(process.env.REDIS_URL || '')
 
 export default async function handler(req: any, res: any) {
   const DB_KEY = 'sustaine_absen_faces_database'
 
-  // ☁️ AMBIL DATA: Seluruh HP Karyawan mengambil database wajah terpusat dari Redis
+  // ☁️ AMBIL DATA: Mengambil database wajah terpusat dari Redis
   if (req.method === 'GET') {
     try {
       const data = await redis.get(DB_KEY)
@@ -16,16 +16,29 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // ☁️ SIMPAN DATA: Ketika Admin upload foto master baru, datanya disimpan ke Redis
+  // ☁️ SIMPAN DATA: Menyimpan data matriks wajah baru ke Redis Cloud
   if (req.method === 'POST') {
     try {
-      const { name, descriptor } = req.body
+      // Proteksi berlapis jika body dikirim dalam bentuk string mentah
+      let body = req.body
+      if (typeof body === 'string') {
+        body = JSON.parse(body)
+      }
       
+      const { name, descriptor } = body
+      
+      if (!name || !descriptor) {
+        return res.status(400).json({ error: 'Missing name or descriptor' })
+      }
+
+      // Ambil data yang sudah ada di awan
       const currentData = await redis.get(DB_KEY)
       const currentDb = currentData ? JSON.parse(currentData) : {}
       
+      // Masukkan koordinat wajah karyawan baru
       currentDb[name] = descriptor
       
+      // Kunci masuk ke Redis Cloud
       await redis.set(DB_KEY, JSON.stringify(currentDb))
       return res.status(200).json({ success: true })
     } catch (err) {
